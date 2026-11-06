@@ -23,3 +23,9 @@
 .env
 .env.*
 !.env.example
+__pycache__/
+*.pyc
+*.app/
+*.dSYM/
+*.dmg
+/macos/build/

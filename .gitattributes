@@ -4,3 +4,6 @@
 *.cs text eol=crlf
 *.md text eol=lf
 *.yml text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.sh text eol=lf

@@ -1,0 +1,41 @@
+name: Platform checks
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test Windows maintenance logic
+        shell: powershell
+        run: .\tests.ps1
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test managed hosts logic
+        run: python3 -m unittest discover -s macos -p test_manage.py -v
+      - name: Compile native helper and run guard tests
+        run: |
+          mkdir -p work/ci
+          xcrun swiftc -swift-version 5 -O -target "$(uname -m)-apple-macosx12.0" \
+            -framework AppKit -framework ApplicationServices macos/KakaoAdblock.swift \
+            -o work/ci/KakaoAdblock
+          work/ci/KakaoAdblock --self-test

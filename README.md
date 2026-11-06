@@ -1,16 +1,26 @@
 # Kakao Adblock Maintenance
 
-A per-user Windows supervisor for [blurfx/KakaoTalkAdBlock](https://github.com/blurfx/KakaoTalkAdBlock). It keeps the upstream UI blocker running, reapplies it when KakaoTalk restarts or changes version, and checks for stable blocker updates.
+A per-user Windows supervisor for [blurfx/KakaoTalkAdBlock](https://github.com/blurfx/KakaoTalkAdBlock), with an experimental macOS helper and an AI-agent maintenance playbook. Windows keeps the upstream UI blocker running, reapplies it when KakaoTalk restarts or changes version, and checks for stable blocker updates.
 
-This project does not modify KakaoTalk binaries or read conversations. The UI blocking rules belong to the upstream project; its executable is downloaded at installation time and is not included in this repository. This project is not affiliated with Kakao or the upstream maintainer.
+This project does not modify KakaoTalk binaries or read conversations. On Windows, UI blocking rules belong to the upstream project; its executable is downloaded at installation time and is not included in this repository. The macOS helper uses a separate, version-gated Accessibility/AppKit cover. This project is not affiliated with Kakao or the upstream maintainer.
 
-## Requirements
+## Platform guides
+
+| Platform / task | Guide | Current scope |
+| --- | --- | --- |
+| Windows | The instructions below | Upstream banner/popup rules and automatic blocker maintenance. |
+| macOS | [macOS setup and limitations](docs/MACOS.md) | Optional DNS block, locally built cover, user LaunchAgent; 26.9.x selector, experimental visual compatibility. |
+| AI-agent follow-up | [Maintenance playbook](docs/AGENT_PLAYBOOK.md) | Privacy-preserving diagnosis, repair, selector updates, validation and publishing. |
+
+AI agents should also read [AGENTS.md](AGENTS.md). See [validation status](docs/VALIDATION.md) for what has actually been tested.
+
+## Windows requirements
 
 - Windows x64 with Windows PowerShell 5.1 and the .NET Framework C# compiler.
 - KakaoTalk for Windows.
 - Internet access to GitHub for installation and update checks.
 
-## Install
+## Windows install
 
 Keep the checkout in a writable, persistent local folder, then run:
 
@@ -45,7 +55,7 @@ Use `Pause.cmd` instead of the upstream tray icon's Exit action: the supervisor 
 
 Automatic updates trust the upstream GitHub repository and publisher. A digest from that same release verifies download integrity; it is not an independent publisher signature. Future KakaoTalk UI changes may require an upstream blocker update. This supervisor does not invent new ad-detection rules.
 
-## DNS and hosts
+## Windows DNS and hosts
 
 The supervisor checks whether these domains are already blocked in the Windows hosts file:
 
@@ -55,7 +65,7 @@ adimg.daumcdn.net
 adimg6.kakaocdn.net
 ```
 
-It does not add, remove, or repair hosts entries. DNS blocking must be configured separately. UI filtering uses the upstream blocker's banner, lock-screen, and popup rules; effectiveness depends on the KakaoTalk version and UI structure.
+The Windows supervisor does not add, remove, or repair hosts entries. DNS blocking must be configured separately. UI filtering uses the upstream blocker's banner, lock-screen, and popup rules; effectiveness depends on the KakaoTalk version and UI structure. The [macOS CLI](docs/MACOS.md) provides separate, explicitly privileged commands for its own hosts block.
 
 ## Local data and privacy
 
@@ -74,3 +84,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests.ps1
 ```
 
 The tests exercise release validation, path boundaries, corrupt downloads, state recovery, process ownership, restart/update signatures, and retry delays without changing KakaoTalk or the system hosts file. They do not establish compatibility with every future KakaoTalk release or reproduce every ad type.
+
+The **Platform checks** GitHub Actions workflow runs these tests on Windows and compiles/tests the Swift helper on macOS. It does not install the helper, request permissions, change hosts or verify a real advertisement. See [validation status](docs/VALIDATION.md) for device-specific limitations.
