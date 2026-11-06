@@ -12,9 +12,9 @@ Keep this record factual. Build success, background-process health and actual ad
 
 ## macOS
 
-- All 11 portable managed-hosts tests passed on Windows.
-- The Swift helper includes geometry/version guard self-tests (`--self-test`).
-- Native CI build results are available in the repository's **Platform checks** workflow. CI does not validate an actual KakaoTalk window or install the helper on a user's machine.
+- All 11 portable managed-hosts tests passed on Windows and on the macOS CI runner.
+- The Swift helper compiled on macOS 26 ARM64 and all 7 geometry/version guard self-tests passed (`--self-test`). Windows also passed all 18 functional tests in the same [Platform checks run](https://github.com/Ruderud/kakao-adblock/actions/runs/42152577264).
+- CI does not validate an actual KakaoTalk window or install the helper on a user's machine. Intel and older macOS versions remain unverified.
 - Target-machine metadata was inspected. Native installation and runtime checks were blocked by remote-command approval timeout; no helper, LaunchAgent or hosts changes were applied there.
 - The inspected app version was 26.8.0, outside the 26.9.x cover selector. It cannot validate removal of the newer banner UI.
 - The selector is experimental: real ad coverage, window ordering, multiple displays, light/dark appearance and popup behavior are not claimed as verified.
