@@ -42,6 +42,8 @@ sudo /usr/bin/python3 -I macos/manage.py hosts-apply
 
 Only the marked `kakao-adblock managed ads` block is managed. Unrelated hosts lines are preserved; malformed/duplicate markers or conflicting unmanaged mappings are rejected. A root-only backup is created before changing `/etc/hosts`. The script flushes the DNS cache and reports whether the flush succeeded. Domain blocking is system-wide, so these exact ad hosts are also blocked for other apps.
 
+In remote automation, native administrator authentication can succeed while macOS still prevents the elevated interpreter from reading a protected checkout. If the source cannot be opened with `Operation not permitted`, stop and follow the [agent playbook's approved staging procedure](AGENT_PLAYBOOK.md#remote-approvals-and-user-permissions). Changing the execution location requires the user's consent, source-integrity checks and normal administrator authorization; it does not grant Accessibility permission.
+
 Blocking ad requests may still leave a built-in promo or blank space. The helper's UI layer is separate. It does not install a local HTTPS server, certificate, proxy or root daemon. A later OS-level hosts reset is reported and requires the privileged command again; the user LaunchAgent cannot silently repair root-owned files.
 
 To remove only this project's hosts block:

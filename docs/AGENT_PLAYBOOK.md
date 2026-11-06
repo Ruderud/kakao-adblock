@@ -35,6 +35,16 @@ If an operation needs Accessibility, the user must grant it themselves through t
 
 If the machine is locked, continue independent CLI checks. Defer only the visual verification that needs an unlocked GUI.
 
+### Remote approvals and user permissions
+
+If a remote approval tool reports `denylisted_command`, inspect only the matching command's audit record and the relevant rule. Do not scan the entire filesystem or unrelated sessions. A compound diagnostic can be rejected because of its output-processing syntax: an observed case was `status | python3 -c ...`, which matched an interpreter-pipeline rule even though the Python code only parsed JSON. This does not establish that hosts changes or app repair are forbidden. Do not disable the guard or disguise/replay a rejected call; explain the exact refusal and obtain the required authorization before any further action.
+
+An administrator dialog returning AppleScript error `-128` means the operation was cancelled. Stop that privileged action and obtain fresh user approval before retrying. Opening a settings pane is also not proof of permission. The user must add/enable **Kakao Adblock Maintenance**, and the installed helper must subsequently report `accessibilityGranted: true` with `stale: false`. Do not edit TCC databases or automate the permission toggle.
+
+After a successful hosts action, check both the exact managed IPv4/IPv6 entries and actual resolver results. Report a lookup error separately from an unblocked address. A user's completion report is useful context; verify the resulting state before marking setup complete.
+
+If an authenticated administrator process cannot open a source file in a protected checkout (`Operation not permitted`), record that failure separately from the remote approval decision. A tested recovery is to stage only the reviewed public `macos/manage.py` in the helper's private `$HOME/Library/Application Support/KakaoAdblockMaintenance/admin-cli` directory. Verify the source against the reviewed commit, reject symlinks, keep the directory/file private, and verify the copied bytes. Obtain explicit user consent for the new execution location. Run the administrator verifier with `/usr/bin/python3 -I` from `/` so the working directory and user Python configuration cannot supply imported modules. It must check the expected SHA-256 and execute the same verified byte buffer, rather than reopen a user-writable file after checking it. Use the normal native authorization dialog; never collect the user's credentials. This staging is an agent-assisted recovery step, not something the current installer performs automatically.
+
 ## 3. Choose the repair layer
 
 | Symptom | Inspect first | Safe next action |

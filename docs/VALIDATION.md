@@ -16,11 +16,13 @@ Keep this record factual. Build success, background-process health and actual ad
 - The Swift helper compiled on macOS 26 ARM64 and all 7 geometry/version guard self-tests passed (`--self-test`). Windows also passed all 18 functional tests in the same [Platform checks run](https://github.com/Ruderud/kakao-adblock/actions/runs/42152577264).
 - CI does not validate an actual KakaoTalk window or install the helper on a user's machine. Intel and older macOS versions remain unverified.
 - On a macOS 26.2 ARM64 device, commit `96a27c7` was installed, all 11 hosts unit tests and 7 Swift self-tests passed, and strict helper code-signature verification returned success.
-- The user LaunchAgent was registered and the installed helper launched. Its status was fresh six seconds after installation. Sign-out/sign-in startup and longer runtime recovery were not tested.
-- Accessibility permission was not granted. The helper reported `unsupported_version_no_cover` with the overlay hidden; the CLI layout inspector reported `needs_accessibility`.
-- On-device pause/resume/repair, PID/version comparison and DNS-preview checks were stopped when the device's local command denylist denied their combined command. They were not retried. Hosts application was not attempted, and all five domains remained unblocked in the hosts status.
+- The user LaunchAgent was registered and the installed helper launched. Direct manual repair succeeded, and the installed helper's status was fresh afterward. Sign-out/sign-in startup, pause/resume and crash recovery were not tested on this device.
+- After the user granted Accessibility and a direct helper repair restarted it, `helper.accessibilityGranted` was `true` with `stale: false`. The helper still reported `unsupported_version_no_cover` with the overlay hidden because of the installed KakaoTalk version.
+- The hosts action succeeded for all five domains, adding both IPv4 and IPv6 blocks. A backup was created and the DNS cache was flushed. The public management script from `96a27c7` was staged in the helper's private support directory with explicit user consent. The administrator verifier ran with `/usr/bin/python3 -I` from `/`, checked the expected SHA-256 and executed the same verified bytes.
+- Resolver checks succeeded for all five domains and returned only loopback or unspecified addresses. `/etc/hosts` remained root-owned with mode `0644`.
 - The inspected app version was 26.8.0, outside the 26.9.x cover selector. It cannot validate removal of the newer banner UI.
 - The selector is experimental: real ad coverage, window ordering, multiple displays, light/dark appearance and popup behavior are not claimed as verified.
+- The visual effect of DNS blocking on this device was not checked; successful resolver checks do not establish that every ad disappeared.
 - The Mac helper does not implement popup removal or ad-slot height reclamation. It does not automatically download new project source or repair root-owned hosts from its user process.
 
 Do not include a machine's name, user account, home path, serial number, private logs or screenshots in this file.
