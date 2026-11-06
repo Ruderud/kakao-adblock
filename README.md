@@ -1,0 +1,76 @@
+# Kakao Adblock Maintenance
+
+A per-user Windows supervisor for [blurfx/KakaoTalkAdBlock](https://github.com/blurfx/KakaoTalkAdBlock). It keeps the upstream UI blocker running, reapplies it when KakaoTalk restarts or changes version, and checks for stable blocker updates.
+
+This project does not modify KakaoTalk binaries or read conversations. The UI blocking rules belong to the upstream project; its executable is downloaded at installation time and is not included in this repository. This project is not affiliated with Kakao or the upstream maintainer.
+
+## Requirements
+
+- Windows x64 with Windows PowerShell 5.1 and the .NET Framework C# compiler.
+- KakaoTalk for Windows.
+- Internet access to GitHub for installation and update checks.
+
+## Install
+
+Keep the checkout in a writable, persistent local folder, then run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+The installer compiles a small launcher, creates a `runtime` directory, and starts protection. It registers a current-user startup entry and a scheduled task with a logon trigger and a five-minute repeat. It does not request administrator privileges. If task registration is unavailable, the installer reports that only sign-in startup is installed.
+
+Use the project-local runtime path instead of a virtualized AppData directory: a packaged parent application can redirect AppData writes to a path that Task Scheduler cannot see. If you move the checkout, rerun the installer to update startup paths.
+
+## Controls
+
+| File | Action |
+| --- | --- |
+| `Repair.cmd` | Check for an update and reapply protection; retry a previously rejected release. |
+| `Pause.cmd` | Disable automatic protection. |
+| `Resume.cmd` | Enable protection again. |
+| `Status.cmd` | Show the local health snapshot. |
+| `Uninstall.ps1` | Remove startup registration and stop protection; retain local files and existing hosts entries. |
+
+Use `Pause.cmd` instead of the upstream tray icon's Exit action: the supervisor intentionally restarts an exited blocker. Some window layout changes persist until KakaoTalk is restarted manually.
+
+## Maintenance behavior
+
+- Checks KakaoTalk process IDs, start times, executable versions, modification times, and sizes every five seconds.
+- Restarts only blocker processes owned by this installation and Windows session. It never stops KakaoTalk itself.
+- Recovers an exited blocker with increasing retry delays, capped at five minutes. Repeated early exits can roll back to the previous working blocker release when one is available.
+- Checks the official upstream GitHub release daily, and on a KakaoTalk change if at least one hour has passed since the last check. Failed network checks retry after 15 minutes.
+- Accepts only stable numeric release tags and the expected x64 asset URL. It verifies the download size and SHA-256 digest before launching the executable.
+- Preserves the previous release for rollback and keeps backup state files for recovery.
+
+Automatic updates trust the upstream GitHub repository and publisher. A digest from that same release verifies download integrity; it is not an independent publisher signature. Future KakaoTalk UI changes may require an upstream blocker update. This supervisor does not invent new ad-detection rules.
+
+## DNS and hosts
+
+The supervisor checks whether these domains are already blocked in the Windows hosts file:
+
+```text
+display.ad.daum.net
+adimg.daumcdn.net
+adimg6.kakaocdn.net
+```
+
+It does not add, remove, or repair hosts entries. DNS blocking must be configured separately. UI filtering uses the upstream blocker's banner, lock-screen, and popup rules; effectiveness depends on the KakaoTalk version and UI structure.
+
+## Local data and privacy
+
+The source contains no installation-specific account names, paths, or credentials. Runtime files are local and excluded from version control:
+
+- `runtime/`: downloaded executables, local state, health snapshots, and logs.
+- `work/`: temporary test data.
+- Logs and snapshots can include process IDs, timestamps, executable versions, and exception messages; an exception may contain a local file path.
+
+The supervisor does not read or record chat contents. Its own outbound requests are to GitHub for release metadata and downloads; the downloaded blocker is a separate upstream application. Do not attach unreviewed runtime files or screenshots to public issues.
+
+## Tests
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests.ps1
+```
+
+The tests exercise release validation, path boundaries, corrupt downloads, state recovery, process ownership, restart/update signatures, and retry delays without changing KakaoTalk or the system hosts file. They do not establish compatibility with every future KakaoTalk release or reproduce every ad type.

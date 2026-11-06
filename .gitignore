@@ -1,0 +1,25 @@
+# Local installation data and downloaded executables
+/runtime/
+/work/
+/versions/
+
+# State and diagnostics from manual source execution
+/state.json*
+/status.json*
+/disabled
+/repair.request
+*.log
+*.log.*
+*.tmp
+*.bak
+*.download
+*.exe
+*.pdb
+*.zip
+
+# Local editor and environment files
+/.vs/
+/.vscode/
+.env
+.env.*
+!.env.example
