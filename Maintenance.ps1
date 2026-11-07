@@ -148,15 +148,40 @@ function Get-KakaoSnapshot {
 }
 function Get-KakaoSignature($Items) { return (@($Items | ForEach-Object { '{0}:{1}:{2}:{3}:{4}' -f $_.Pid,$_.StartedUtc,$_.Version,$_.WriteTicks,$_.Length }) -join ';') }
 function Get-CrashDelay([int]$Failures) { return [int][Math]::Min(300, (5 * [Math]::Pow(2, [Math]::Min(6, [Math]::Max(0, $Failures - 1))))) }
-function Get-HostsStatus {
-    $required = @('display.ad.daum.net','adimg.daumcdn.net','adimg6.kakaocdn.net')
-    $blocked = @{}
-    foreach ($line in (Get-Content -LiteralPath "$env:SystemRoot\System32\drivers\etc\hosts")) {
-        $parts = ($line -replace '#.*$', '').Trim() -split '\s+'
-        if ($parts.Count -lt 2 -or $parts[0] -notin @('0.0.0.0','127.0.0.1','::','::1')) { continue }
-        foreach ($domain in $parts[1..($parts.Count-1)]) { $blocked[$domain.ToLowerInvariant()] = $true }
+function Get-ReleaseSchedule($State, [datetime]$Now = [datetime]::UtcNow) {
+    $Now = $Now.ToUniversalTime()
+    $last = [datetime]::MinValue
+    $next = [datetime]::MinValue
+    try {
+        if ($State.LastCheckUtc) { $last = [datetime]::Parse($State.LastCheckUtc).ToUniversalTime() }
+        if ($State.NextCheckUtc) { $next = [datetime]::Parse($State.NextCheckUtc).ToUniversalTime() }
+        # A clock correction must not postpone update checks for months or years.
+        $reset = $last -gt $Now.AddMinutes(5) -or $next -gt $Now.AddHours(25) -or $next -lt $last
+    } catch { $reset = $true }
+    return [pscustomobject]@{
+        ResetClock = $reset
+        Due = $reset -or $next -eq [datetime]::MinValue -or $Now -ge $next
+        ElapsedHours = $(if ($reset) { [double]::PositiveInfinity } else { ($Now - $last).TotalHours })
     }
-    return @($required | ForEach-Object { [pscustomobject]@{Domain=$_;Blocked=$blocked.ContainsKey($_)} })
+}
+function Get-HostsStatus([string]$Path = "$env:SystemRoot\System32\drivers\etc\hosts") {
+    $required = @('display.ad.daum.net','adimg.daumcdn.net','adimg6.kakaocdn.net')
+    $ipv4 = @{}; $ipv6 = @{}; $conflicts = @{}
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        $parts = ($line -replace '#.*$', '').Trim() -split '\s+'
+        if ($parts.Count -lt 2) { continue }
+        foreach ($domain in $parts[1..($parts.Count-1)]) {
+            $domain = $domain.ToLowerInvariant()
+            if ($parts[0] -in @('0.0.0.0','127.0.0.1')) { $ipv4[$domain] = $true }
+            elseif ($parts[0] -in @('::','::1')) { $ipv6[$domain] = $true }
+            else { $conflicts[$domain] = $true }
+        }
+    }
+    return @($required | ForEach-Object { [pscustomobject]@{
+        Domain=$_; IPv4Blocked=$ipv4.ContainsKey($_); IPv6Blocked=$ipv6.ContainsKey($_)
+        ConflictingMapping=$conflicts.ContainsKey($_)
+        Blocked=$ipv4.ContainsKey($_) -and $ipv6.ContainsKey($_) -and -not $conflicts.ContainsKey($_)
+    } })
 }
 function Start-Launcher {
     Start-Process -FilePath (Join-Path $script:Root 'KakaoAdMaintenance.exe') -WindowStyle Hidden
@@ -177,8 +202,6 @@ function Invoke-Watch([bool]$Once) {
         $lastBlockerPid = $null
         $lastBlockerStart = [datetime]::MinValue
         $retryAfter = [datetime]::MinValue
-        $lastAttempt = [datetime]::MinValue
-        if ($state.LastCheckUtc) { $lastAttempt = [datetime]::Parse($state.LastCheckUtc).ToUniversalTime() }
         Write-Log ('supervisor-started pid=' + $PID)
         do {
             try {
@@ -193,11 +216,14 @@ function Invoke-Watch([bool]$Once) {
                     $rapidCrashes = 0
                     $retryAfter = [datetime]::MinValue
                 }
-                $elapsed = ([datetime]::UtcNow - $lastAttempt).TotalHours
-                $due = -not $state.NextCheckUtc -or [datetime]::UtcNow -ge [datetime]::Parse($state.NextCheckUtc).ToUniversalTime()
-                if ($repair -or $due -or ($changed -and $elapsed -ge 1)) {
-                    $lastAttempt = [datetime]::UtcNow
-                    $state.LastCheckUtc = $lastAttempt.ToString('o')
+                $schedule = Get-ReleaseSchedule $state
+                if ($schedule.ResetClock) {
+                    $state.LastCheckUtc = $null
+                    $state.NextCheckUtc = $null
+                    Write-Log 'release-schedule-reset; invalid or future timestamps'
+                }
+                if ($repair -or $schedule.Due -or ($changed -and $schedule.ElapsedHours -ge 1)) {
+                    $state.LastCheckUtc = [datetime]::UtcNow.ToString('o')
                     Write-JsonAtomic $script:StatePath $state
                     try {
                         $null = Install-Latest $state
@@ -256,7 +282,8 @@ function Invoke-Watch([bool]$Once) {
                 }
                 $lastSignature = $signature
                 $failures = 0
-                Write-JsonAtomic $script:StatusPath ([ordered]@{UpdatedUtc=[datetime]::UtcNow.ToString('o');SupervisorPid=$PID;Enabled=$true;BlockerVersion=$(if ($state.Current) {$state.Current.Version} else {$null});BlockerPids=@(Get-OwnedBlockers | ForEach-Object {$_.Id});Kakao=$snapshot;Hosts=@(Get-HostsStatus);LastReleaseCheckUtc=$state.LastCheckUtc;LastError=$lastError})
+                $hostsStatus = @(Get-HostsStatus)
+                Write-JsonAtomic $script:StatusPath ([ordered]@{UpdatedUtc=[datetime]::UtcNow.ToString('o');SupervisorPid=$PID;Enabled=$true;BlockerVersion=$(if ($state.Current) {$state.Current.Version} else {$null});BlockerPids=@(Get-OwnedBlockers | ForEach-Object {$_.Id});Kakao=$snapshot;Hosts=$hostsStatus;DnsProtectionComplete=(@($hostsStatus | Where-Object {-not $_.Blocked}).Count -eq 0);LastReleaseCheckUtc=$state.LastCheckUtc;LastError=$lastError})
             } catch {
                 $lastError = $_.Exception.Message
                 $failures++

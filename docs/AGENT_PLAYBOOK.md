@@ -19,6 +19,10 @@ Run `Status.cmd` or the installed script's `-Mode Status`. Read `runtime/mainten
 
 Run `Repair.cmd` for a safe first repair. It checks the official upstream release and restarts only the installation's blocker. Avoid restarting KakaoTalk while the user is composing a message or on a call.
 
+Use `Status.cmd` or `runtime/Maintenance.ps1 -Mode Status` for the installed instance. Running the source-root script reads a different state directory. Check `DnsProtectionComplete`, each domain's `IPv4Blocked`/`IPv6Blocked` flags and `ConflictingMapping`, then confirm resolution with `Resolve-DnsName -Name <domain> -Type A` and `-Type AAAA`. A .NET address lookup may return `NoData` for unspecified-address blocks; verify the native A/AAAA results instead of treating the error as success. Do not use `nslookup` as proof of a hosts-file override. If the hosts file is empty or its mappings disappeared, preserve the current file and restore only the previously authorized ad domains with normal administrator consent. Do not overwrite unrelated entries, change file permissions or silently install an elevated repair task. Recheck the file after restoration; the program that removed the entries may still be active.
+
+Compare `LastReleaseCheckUtc` and the persisted next-check timestamp with the current clock. The supervisor resets malformed, reversed or implausibly future schedules, but updating source files alone does not replace an already running installed copy: run `Install.ps1` after validation. An existing blocker process may retain upstream window caches; `Repair.cmd` restarts the owned blocker. Keep a static upstream code concern separate from a reproduced popup failure, and do not claim that a restart proves the next transient popup will be suppressed.
+
 ### macOS
 
 ```sh

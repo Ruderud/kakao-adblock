@@ -41,6 +41,34 @@ Assert ((Get-KakaoSignature $one) -cne (Get-KakaoSignature $restart)) 'PID reuse
 Assert ((Get-KakaoSignature $one) -cne (Get-KakaoSignature $update)) 'In-place application update changes signature'
 Assert ((Get-CrashDelay 1) -eq 5 -and (Get-CrashDelay 3) -eq 20 -and (Get-CrashDelay 20) -eq 300) 'Repeated crash retries back off with a five-minute cap'
 
+$now = [datetime]'2026-11-07T03:00:00Z'
+$scheduleState = [pscustomobject]@{LastCheckUtc=$now.AddMinutes(-10).ToString('o');NextCheckUtc=$now.AddHours(23).ToString('o')}
+$schedule = Get-ReleaseSchedule $scheduleState $now
+Assert (-not $schedule.Due -and -not $schedule.ResetClock) 'Normal daily schedule remains deferred'
+$scheduleState.LastCheckUtc = $now.AddYears(2).ToString('o'); $scheduleState.NextCheckUtc = $now.AddYears(2).AddDays(1).ToString('o')
+$schedule = Get-ReleaseSchedule $scheduleState $now
+Assert ($schedule.Due -and $schedule.ResetClock -and $schedule.ElapsedHours -ge 1) 'Clock rollback forces an update check instead of waiting years'
+$scheduleState.LastCheckUtc = 'invalid'; $scheduleState.NextCheckUtc = 'invalid'
+Assert ((Get-ReleaseSchedule $scheduleState $now).Due) 'Malformed persisted schedule cannot disable update checks'
+$scheduleState.LastCheckUtc = $now.AddMinutes(-5).ToString('o'); $scheduleState.NextCheckUtc = $now.AddMinutes(10).ToString('o')
+Assert (-not (Get-ReleaseSchedule $scheduleState $now).Due) 'Network retry delay is preserved'
+$scheduleState.NextCheckUtc = $now.AddDays(3).ToString('o')
+Assert ((Get-ReleaseSchedule $scheduleState $now).ResetClock) 'An implausibly distant next check is reset'
+$scheduleState.NextCheckUtc = $now.AddMinutes(-10).ToString('o')
+Assert ((Get-ReleaseSchedule $scheduleState $now).ResetClock) 'Reversed persisted timestamps trigger recovery'
+
+$hostsFixture = Join-Path $testRoot 'hosts-fixture'
+[IO.File]::WriteAllText($hostsFixture, '')
+Assert (@(Get-HostsStatus $hostsFixture | Where-Object {$_.Blocked}).Count -eq 0) 'An empty hosts file is reported as unprotected'
+[IO.File]::WriteAllText($hostsFixture, "0.0.0.0 display.ad.daum.net`n")
+$dns = @(Get-HostsStatus $hostsFixture)[0]
+Assert ($dns.IPv4Blocked -and -not $dns.IPv6Blocked -and -not $dns.Blocked) 'IPv4 alone is not reported as complete DNS protection'
+[IO.File]::WriteAllText($hostsFixture, "127.0.0.1 DISPLAY.AD.DAUM.NET # local block`n::1 display.ad.daum.net`n")
+Assert (@(Get-HostsStatus $hostsFixture)[0].Blocked) 'IPv4 and IPv6 blocks are recognized case-insensitively'
+[IO.File]::AppendAllText($hostsFixture, "192.0.2.1 display.ad.daum.net`n")
+$dns = @(Get-HostsStatus $hostsFixture)[0]
+Assert ($dns.ConflictingMapping -and -not $dns.Blocked) 'Conflicting unblocked mappings prevent a false healthy result'
+
 Write-JsonAtomic $script:StatePath ([pscustomobject]@{Current='original'})
 Write-JsonAtomic $script:StatePath ([pscustomobject]@{Current='replacement'})
 Assert ((Get-Content $script:StatePath -Raw | ConvertFrom-Json).Current -eq 'replacement') 'Atomic state replacement remains readable'

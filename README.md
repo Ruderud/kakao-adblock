@@ -50,6 +50,7 @@ Use `Pause.cmd` instead of the upstream tray icon's Exit action: the supervisor 
 - Restarts only blocker processes owned by this installation and Windows session. It never stops KakaoTalk itself.
 - Recovers an exited blocker with increasing retry delays, capped at five minutes. Repeated early exits can roll back to the previous working blocker release when one is available.
 - Checks the official upstream GitHub release daily, and on a KakaoTalk change if at least one hour has passed since the last check. Failed network checks retry after 15 minutes.
+- Resets invalid or implausibly future update timestamps after a system-clock correction, so an old future date cannot postpone checks indefinitely.
 - Accepts only stable numeric release tags and the expected x64 asset URL. It verifies the download size and SHA-256 digest before launching the executable.
 - Preserves the previous release for rollback and keeps backup state files for recovery.
 
@@ -65,7 +66,9 @@ adimg.daumcdn.net
 adimg6.kakaocdn.net
 ```
 
-The Windows supervisor does not add, remove, or repair hosts entries. DNS blocking must be configured separately. UI filtering uses the upstream blocker's banner, lock-screen, and popup rules; effectiveness depends on the KakaoTalk version and UI structure. The [macOS CLI](docs/MACOS.md) provides separate, explicitly privileged commands for its own hosts block.
+Status reports IPv4 and IPv6 entries separately and flags conflicting mappings. `DnsProtectionComplete` is true only when all three domains have both families blocked without conflicts. This is a hosts-file check; verify actual resolver behavior separately.
+
+The Windows supervisor does not add, remove, or repair hosts entries. DNS blocking must be configured separately with administrator authorization. If another application or a system reset removes these entries, a running UI blocker does not mean DNS protection is still active. UI filtering uses the upstream blocker's banner, lock-screen, and popup rules; effectiveness depends on the KakaoTalk version and UI structure. The [macOS CLI](docs/MACOS.md) provides separate, explicitly privileged commands for its own hosts block.
 
 ## Local data and privacy
 

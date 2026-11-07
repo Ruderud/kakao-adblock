@@ -4,11 +4,19 @@ Keep this record factual. Build success, background-process health and actual ad
 
 ## Windows
 
-- 18 functional tests passed, including release/path validation, corrupt-download rejection, state recovery, ownership and retry timing.
+- 28 functional tests passed, including release/path validation, corrupt-download rejection, state recovery, ownership, retry timing, clock rollback and IPv4/IPv6 hosts diagnostics.
 - The launcher compiled with the .NET Framework compiler.
 - Bottom-banner removal and list expansion were visually verified on KakaoTalk 26.9.2.5342.
 - Owned-blocker crash recovery, duplicate launch protection, manual repair and scheduled supervisor recovery were exercised.
 - A separate popup was not reproduced for visual verification. A future real KakaoTalk update was not performed; version/restart detection was tested with synthetic inputs.
+
+### Popup report follow-up: 2026-11-07
+
+- A user reported a transient bottom-right ad. The installed upstream blocker was running, matched the official 2.2.5 asset hash and was still the latest stable release.
+- The Windows hosts file was empty and DNS protection was absent. The process that cleared it was not identified. Persisted release-check timestamps were also far in the future, preventing a timely automatic update check.
+- With native administrator authorization, the three previously configured ad domains were restored for IPv4 and IPv6 after verifying the file was still empty. The original empty file was backed up and the DNS cache was flushed. `Resolve-DnsName` returned only `0.0.0.0` for A and `::` for AAAA records for all three domains. The .NET address lookup returned `NoData`; that result alone was not treated as proof of blocking.
+- The updated supervisor was installed, reset its future schedule, completed a fresh release check and started a new verified blocker process. Its status reported `DnsProtectionComplete: true` and no error. KakaoTalk itself was not restarted.
+- The popup was not reproduced during diagnosis. Restoring DNS and restarting the blocker do not establish that every future popup will be suppressed; the upstream UI rules remain unchanged.
 
 ## macOS
 
