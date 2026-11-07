@@ -125,7 +125,11 @@ internal static class DiagnosticsTests
         string blocked=Path.Combine(root,"not-a-directory"); File.WriteAllText(blocked,"fixture");
         var brokenJournal=new Journal(blocked); brokenJournal.Write("sink_test",new { value=1 });
         Check(brokenJournal.LogWriteFailures>0,"A broken journal sink reports failure without throwing into protection");
-        RunNativeFixture(Folder(root,"native"));
+        // Exercise the UTF-8 console used by hosted Windows CI. Framework's
+        // redirected StreamWriter can otherwise prefix the first command with a BOM.
+        var previousEncoding=Console.InputEncoding;
+        try { Console.InputEncoding=new System.Text.UTF8Encoding(true); RunNativeFixture(Folder(root,"native")); }
+        finally { Console.InputEncoding=previousEncoding; }
         Console.WriteLine("Diagnostics tests passed: "+count);
     }
 
@@ -153,7 +157,8 @@ internal static class DiagnosticsTests
                         if(request==null) { request=observer.TryRequestRepair(); if(request!=null) { requestedAt=timeout.ElapsedMilliseconds; observer.CompleteRepair(request,false); } }
                         Thread.Sleep(50);
                     }
-                    if(!child.HasExited || child.ExitCode!=0) throw new Exception("Native fixture failed or timed out");
+                    if(!child.HasExited) throw new Exception("Native fixture timed out");
+                    if(child.ExitCode!=0) throw new Exception("Native fixture failed: "+child.StandardError.ReadToEnd());
                     Thread.Sleep(200);
                     var events=Events(directory);
                     Check(events.Contains("window_first_observed"),"Native creation/show events discover the off-screen fixture");
@@ -197,7 +202,10 @@ internal static class NativeFixture
     }
     internal static void Run() {
         Console.WriteLine("ready"); Console.Out.Flush();
-        if(Console.ReadLine()!="go") return;
+        using(var input=new StreamReader(Console.OpenStandardInput(),System.Text.Encoding.UTF8,true))
+        {
+            if(input.ReadLine()!="go") throw new Exception("Native fixture handshake failed");
+        }
         Register("EVA_Window"); Register("Chrome_WidgetWin_1");
         IntPtr root=CreateWindowEx(0x08000080,"EVA_Window","",0x80000000,-30000,-30000,450,300,IntPtr.Zero,IntPtr.Zero,GetModuleHandle(null),IntPtr.Zero);
         if(root==IntPtr.Zero) throw new Exception("Fixture creation failed");
