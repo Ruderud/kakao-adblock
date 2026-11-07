@@ -4,7 +4,7 @@ Keep this record factual. Build success, background-process health and actual ad
 
 ## Windows
 
-- 28 functional tests passed, including release/path validation, corrupt-download rejection, state recovery, ownership, retry timing, clock rollback and IPv4/IPv6 hosts diagnostics.
+- 38 PowerShell maintenance tests and 43 C# diagnostics tests passed, including release/path validation, corrupt-download rejection, state recovery, ownership, retry timing, clock rollback, IPv4/IPv6 hosts diagnostics and recurrence tracking.
 - The launcher compiled with the .NET Framework compiler.
 - Bottom-banner removal and list expansion were visually verified on KakaoTalk 26.9.2.5342.
 - Owned-blocker crash recovery, duplicate launch protection, manual repair and scheduled supervisor recovery were exercised.
@@ -17,6 +17,14 @@ Keep this record factual. Build success, background-process health and actual ad
 - With native administrator authorization, the three previously configured ad domains were restored for IPv4 and IPv6 after verifying the file was still empty. The original empty file was backed up and the DNS cache was flushed. `Resolve-DnsName` returned only `0.0.0.0` for A and `::` for AAAA records for all three domains. The .NET address lookup returned `NoData`; that result alone was not treated as proof of blocking.
 - The updated supervisor was installed, reset its future schedule, completed a fresh release check and started a new verified blocker process. Its status reported `DnsProtectionComplete: true` and no error. KakaoTalk itself was not restarted.
 - The popup was not reproduced during diagnosis. Restoring DNS and restarting the blocker do not establish that every future popup will be suppressed; the upstream UI rules remain unchanged.
+
+### Persistent recurrence logging: 2026-11-07
+
+- Synthetic tests exercised process-scoped native events with an off-screen fixture, rapid hide/show notifications, late child creation, reused identities, repair correlation, cooldowns, attempt limits, log rotation and failed writes. A generic Chromium caption did not trigger automatic recovery; an explicit ad marker was required. The fixture override is compiled only into the test executable.
+- The production observer attached two hooks to the running KakaoTalk process. It reported no dropped events, failed log writes or worker failures. Its one observed banner candidate had zero dimensions and was not treated as a visible ad.
+- Installation and replacement of a loaded diagnostics module succeeded. The previous observer logged a clean shutdown, and the replacement started a new session. KakaoTalk retained its original process; only this project's helper was restarted.
+- No real popup recurrence was captured during these checks. The synthetic fixture establishes event handling and bounded recovery behavior, not successful removal of every KakaoTalk popup.
+- The three Windows DNS blocks were absent again while another user-authorized hosts configuration task was active. No writer was identified. This follow-up left hosts unchanged to avoid concurrent writes, and status correctly reported incomplete DNS protection. Restoring the managed block remains pending until that other task finishes.
 
 ## macOS
 

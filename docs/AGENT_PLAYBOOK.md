@@ -17,6 +17,8 @@ Never claim that a running process proves an ad was removed. Never claim that a 
 
 Run `Status.cmd` or the installed script's `-Mode Status`. Read `runtime/maintenance.log` locally only as needed. Record the versions, last error category and whether the helper is running. Runtime logs can contain personal paths in errors; do not publish them verbatim.
 
+For recurrence, start with `History.cmd` and the [diagnostics guide](DIAGNOSTICS.md). The append-only `runtime/events.jsonl` history preserves window/DNS transitions and correlated restart results; `status.json` remains a current snapshot. Verify `Diagnostics.running`, hook coverage and event/write-loss counters before relying on an absence of events. A candidate, an upstream-pattern match and a visually verified ad are different evidence levels. The journal does not identify the caller that hid a window or the writer that edited hosts. If another authorized configuration task is editing hosts at the same time, coordinate that shared file instead of blaming Kakao or overwriting the other task's rules.
+
 Run `Repair.cmd` for a safe first repair. It checks the official upstream release and restarts only the installation's blocker. Avoid restarting KakaoTalk while the user is composing a message or on a call.
 
 Use `Status.cmd` or `runtime/Maintenance.ps1 -Mode Status` for the installed instance. Running the source-root script reads a different state directory. Check `DnsProtectionComplete`, each domain's `IPv4Blocked`/`IPv6Blocked` flags and `ConflictingMapping`, then confirm resolution with `Resolve-DnsName -Name <domain> -Type A` and `-Type AAAA`. A .NET address lookup may return `NoData` for unspecified-address blocks; verify the native A/AAAA results instead of treating the error as success. Do not use `nslookup` as proof of a hosts-file override. If the hosts file is empty or its mappings disappeared, preserve the current file and restore only the previously authorized ad domains with normal administrator consent. Do not overwrite unrelated entries, change file permissions or silently install an elevated repair task. Recheck the file after restoration; the program that removed the entries may still be active.
@@ -65,6 +67,7 @@ If an authenticated administrator process cannot open a source file in a protect
 
 - `Maintenance.ps1`: owned process checks, version/restart signature, official release download validation, retry and rollback, local health.
 - `Launcher.cs`, `Install.ps1`: hidden launcher and per-user startup.
+- `Diagnostics.cs`: process-scoped native events, fresh structural snapshots, bounded JSONL history and rate-limited restart requests. It never hides windows itself. `Diagnostics.Tests.cs` uses a compile-time-only off-screen fixture target; production builds cannot select arbitrary test processes.
 - Upstream UI rules: `blurfx/KakaoTalkAdBlock`, not this repository. Preserve upstream attribution; do not redistribute a modified proprietary app.
 
 ### macOS implementation map

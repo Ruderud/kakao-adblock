@@ -40,6 +40,7 @@ Use the project-local runtime path instead of a virtualized AppData directory: a
 | `Pause.cmd` | Disable automatic protection. |
 | `Resume.cmd` | Enable protection again. |
 | `Status.cmd` | Show the local health snapshot. |
+| `History.cmd` | Show recent local ad/DNS lifecycle events and recovery results. |
 | `Uninstall.ps1` | Remove startup registration and stop protection; retain local files and existing hosts entries. |
 
 Use `Pause.cmd` instead of the upstream tray icon's Exit action: the supervisor intentionally restarts an exited blocker. Some window layout changes persist until KakaoTalk is restarted manually.
@@ -51,6 +52,7 @@ Use `Pause.cmd` instead of the upstream tray icon's Exit action: the supervisor 
 - Recovers an exited blocker with increasing retry delays, capped at five minutes. Repeated early exits can roll back to the previous working blocker release when one is available.
 - Checks the official upstream GitHub release daily, and on a KakaoTalk change if at least one hour has passed since the last check. Failed network checks retry after 15 minutes.
 - Resets invalid or implausibly future update timestamps after a system-clock correction, so an old future date cannot postpone checks indefinitely.
+- Records ad-window lifecycle and hosts/DNS changes in a bounded local journal. Persistent popups matching the existing upstream pattern can request a rate-limited restart of the owned blocker. See [recurrence diagnostics](docs/DIAGNOSTICS.md) for evidence, privacy and limitations.
 - Accepts only stable numeric release tags and the expected x64 asset URL. It verifies the download size and SHA-256 digest before launching the executable.
 - Preserves the previous release for rollback and keeps backup state files for recovery.
 

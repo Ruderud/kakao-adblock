@@ -69,6 +69,29 @@ Assert (@(Get-HostsStatus $hostsFixture)[0].Blocked) 'IPv4 and IPv6 blocks are r
 $dns = @(Get-HostsStatus $hostsFixture)[0]
 Assert ($dns.ConflictingMapping -and -not $dns.Blocked) 'Conflicting unblocked mappings prevent a false healthy result'
 
+$evidence = Get-HostsEvidence $hostsFixture
+$baseline = @(Get-HostsEvents $null $evidence)
+Assert ($baseline.Count -eq 1 -and $baseline[0].Event -eq 'hosts_baseline') 'Initial hosts evidence is a baseline, not an invented deletion'
+Assert (@(Get-HostsEvents $evidence $evidence).Count -eq 0) 'Unchanged DNS evidence does not flood the event journal'
+$lines = @()
+foreach ($domain in @('display.ad.daum.net','adimg.daumcdn.net','adimg6.kakaocdn.net')) { $lines += "0.0.0.0 $domain"; $lines += ":: $domain" }
+[IO.File]::WriteAllText($hostsFixture, ($lines -join "`n"))
+$complete = Get-HostsEvidence $hostsFixture
+$restoredEvents = @(Get-HostsEvents $evidence $complete)
+Assert ($complete.Complete -and $restoredEvents.Event -contains 'dns_protection_restored') 'Restored blocking is recorded as a transition'
+[IO.File]::WriteAllText($hostsFixture, '')
+$empty = Get-HostsEvidence $hostsFixture
+$lostEvents = @(Get-HostsEvents $complete $empty)
+Assert ($lostEvents.Event -contains 'hosts_changed' -and $lostEvents.Event -contains 'dns_protection_lost') 'Erased hosts entries retain before/after evidence and loss event'
+Assert ($empty.WriterAttribution -eq 'unknown' -and $lostEvents[0].Data.WriterAttribution -eq 'unknown') 'A file change never attributes the writer to Kakao without evidence'
+$missing = Get-HostsEvidence (Join-Path $testRoot 'missing-hosts')
+Assert ($missing.ReadState -eq 'unavailable' -and -not $missing.Complete) 'Missing hosts is distinguishable from a successful readable snapshot'
+Assert (@(Get-HostsEvents $complete $missing).Event -contains 'dns_protection_unknown') 'A read failure is unknown protection, not proof that rules were removed'
+Assert (@(Get-HostsEvents $missing $complete).Event -contains 'dns_protection_verified') 'Readable protection after an error is verification, not an invented restore'
+$lockedFixture = [IO.File]::Open($hostsFixture, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try { Assert ((Get-HostsEvidence $hostsFixture).ReadState -eq 'unavailable') 'A concurrent writer cannot produce a mixed-revision DNS snapshot' } finally { $lockedFixture.Dispose() }
+Assert (($lostEvents | ConvertTo-Json -Depth 8) -notmatch [regex]::Escape($testRoot)) 'DNS event data omits the local file path'
+
 Write-JsonAtomic $script:StatePath ([pscustomobject]@{Current='original'})
 Write-JsonAtomic $script:StatePath ([pscustomobject]@{Current='replacement'})
 Assert ((Get-Content $script:StatePath -Raw | ConvertFrom-Json).Current -eq 'replacement') 'Atomic state replacement remains readable'
@@ -97,3 +120,10 @@ function Get-Process {
 $owned = @(Get-OwnedBlockers)
 Assert ($owned.Count -eq 1 -and $owned[0].Id -eq 1) 'Only this installation and session is eligible for process control'
 'Tests passed: ' + $script:Count
+
+$compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$diagnosticTests = Join-Path $testRoot 'Diagnostics.Tests.exe'
+& $compiler /nologo /target:exe /optimize+ /define:DIAGNOSTICS_TESTS /codepage:65001 /reference:System.Web.Extensions.dll ('/out:' + $diagnosticTests) (Join-Path $PSScriptRoot 'Diagnostics.cs') (Join-Path $PSScriptRoot 'Diagnostics.Tests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Diagnostics test compilation failed.' }
+& $diagnosticTests (Join-Path $testRoot 'diagnostics')
+if ($LASTEXITCODE -ne 0) { throw 'Diagnostics tests failed.' }

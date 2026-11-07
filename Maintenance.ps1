@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Watch','Once','Status','Repair','Stop','Resume','Library')]
+    [ValidateSet('Watch','Once','Status','History','Repair','Stop','Resume','Library')]
     [string]$Mode = 'Watch'
 )
 $ErrorActionPreference = 'Stop'
@@ -165,9 +165,12 @@ function Get-ReleaseSchedule($State, [datetime]$Now = [datetime]::UtcNow) {
     }
 }
 function Get-HostsStatus([string]$Path = "$env:SystemRoot\System32\drivers\etc\hosts") {
+    return @(Convert-HostsLines @(Get-Content -LiteralPath $Path))
+}
+function Convert-HostsLines([string[]]$Lines) {
     $required = @('display.ad.daum.net','adimg.daumcdn.net','adimg6.kakaocdn.net')
     $ipv4 = @{}; $ipv6 = @{}; $conflicts = @{}
-    foreach ($line in (Get-Content -LiteralPath $Path)) {
+    foreach ($line in $Lines) {
         $parts = ($line -replace '#.*$', '').Trim() -split '\s+'
         if ($parts.Count -lt 2) { continue }
         foreach ($domain in $parts[1..($parts.Count-1)]) {
@@ -183,6 +186,64 @@ function Get-HostsStatus([string]$Path = "$env:SystemRoot\System32\drivers\etc\h
         Blocked=$ipv4.ContainsKey($_) -and $ipv6.ContainsKey($_) -and -not $conflicts.ContainsKey($_)
     } })
 }
+function Write-Diagnostic($Diagnostics, [string]$Event, $Data) {
+    if ($null -eq $Diagnostics) { return }
+    try { $Diagnostics.Record($Event, ($Data | ConvertTo-Json -Depth 8 -Compress)) } catch { }
+}
+function Get-HostsEvidence([string]$Path = "$env:SystemRoot\System32\drivers\etc\hosts") {
+    try {
+        # Read one stable byte buffer. A concurrent writer produces unknown evidence,
+        # never a mixture of mappings from one revision and a hash from another.
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            if ($stream.Length -gt 4194304) { throw 'Hosts evidence size limit exceeded.' }
+            $memory = [IO.MemoryStream]::new()
+            try { $stream.CopyTo($memory); $bytes = $memory.ToArray() } finally { $memory.Dispose() }
+            $writeUtc = (Get-Item -LiteralPath $Path).LastWriteTimeUtc.ToString('o')
+        } finally { $stream.Dispose() }
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try { $hash = ([BitConverter]::ToString($algorithm.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $algorithm.Dispose() }
+        $reader = [IO.StreamReader]::new([IO.MemoryStream]::new($bytes), [Text.Encoding]::UTF8, $true)
+        try { $mappings = @(Convert-HostsLines ($reader.ReadToEnd() -split '\r?\n')) } finally { $reader.Dispose() }
+        return [pscustomobject]@{ReadState='ok';Length=$bytes.Length;WriteUtc=$writeUtc;Sha256=$hash;Mappings=$mappings;Complete=($mappings.Count -eq 3 -and @($mappings | Where-Object {-not $_.Blocked}).Count -eq 0);WriterAttribution='unknown'}
+    } catch {
+        return [pscustomobject]@{ReadState='unavailable';Length=$null;WriteUtc=$null;Sha256=$null;Mappings=@();Complete=$false;WriterAttribution='unknown'}
+    }
+}
+function Get-HostsEvents($Previous, $Current) {
+    if ($null -eq $Previous) {
+        return @([pscustomobject]@{Event='hosts_baseline';Data=$Current})
+    }
+    $before = $Previous | ConvertTo-Json -Depth 6 -Compress
+    $after = $Current | ConvertTo-Json -Depth 6 -Compress
+    if ($before -ceq $after) { return @() }
+    $events = @([pscustomobject]@{Event='hosts_changed';Data=[ordered]@{Before=$Previous;After=$Current;WriterAttribution='unknown'}})
+    if ($Previous.ReadState -eq 'ok' -and $Current.ReadState -ne 'ok') {
+        $events += [pscustomobject]@{Event='dns_protection_unknown';Data=@{ReadState=$Current.ReadState;WriterAttribution='unknown'}}
+    } elseif ($Previous.Complete -and -not $Current.Complete) {
+        $events += [pscustomobject]@{Event='dns_protection_lost';Data=[ordered]@{ReadState=$Current.ReadState;Mappings=$Current.Mappings;RequiresAdministrator=$true;WriterAttribution='unknown'}}
+    } elseif ($Previous.ReadState -ne 'ok' -and $Current.ReadState -eq 'ok') {
+        $events += [pscustomobject]@{Event='dns_protection_verified';Data=@{Complete=$Current.Complete;Mappings=$Current.Mappings;WriterAttribution='unknown'}}
+    } elseif (-not $Previous.Complete -and $Current.Complete) {
+        $events += [pscustomobject]@{Event='dns_protection_restored';Data=[ordered]@{Mappings=$Current.Mappings;WriterAttribution='unknown'}}
+    }
+    return $events
+}
+function Start-Diagnostics {
+    if (-not ('KakaoAdDiagnostics.Session' -as [type])) {
+        Add-Type -Path (Join-Path $script:Root 'Diagnostics.dll')
+    }
+    $observer = [KakaoAdDiagnostics.Session]::new($script:Root)
+    try { $observer.Start(); return $observer } catch { Stop-Diagnostics $observer; throw }
+}
+function Stop-Diagnostics($Diagnostics) {
+    if ($null -ne $Diagnostics) { try { $Diagnostics.Dispose() } catch { Write-Log 'diagnostics-dispose-failed' } }
+}
+function Complete-DiagnosticRepair($Diagnostics, [string]$Id, [bool]$Restarted) {
+    if ($Diagnostics -and $Id) {
+        try { $Diagnostics.CompleteRepair($Id, $Restarted) } catch { Write-Log 'diagnostics-complete-failed' }
+    }
+}
 function Start-Launcher {
     Start-Process -FilePath (Join-Path $script:Root 'KakaoAdMaintenance.exe') -WindowStyle Hidden
 }
@@ -190,6 +251,9 @@ function Invoke-Watch([bool]$Once) {
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $mutex = [Threading.Mutex]::new($false, ('Local\KakaoAdMaintenance-' + $sid))
     $locked = $false
+    $diagnostics = $null
+    $diagnosticsRetryAfter = [datetime]::MinValue
+    $lastHostsEvidence = $null
     try {
         try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
         if (-not $locked) { return }
@@ -204,12 +268,28 @@ function Invoke-Watch([bool]$Once) {
         $retryAfter = [datetime]::MinValue
         Write-Log ('supervisor-started pid=' + $PID)
         do {
+            $automaticRepairId = $null
             try {
                 if (Test-Path -LiteralPath $script:DisablePath) { break }
+                if ($null -eq $diagnostics -and [datetime]::UtcNow -ge $diagnosticsRetryAfter) {
+                    try {
+                        $diagnostics = Start-Diagnostics
+                        $lastHostsEvidence = $null
+                        Write-Diagnostic $diagnostics 'supervisor_started' @{SupervisorPid=$PID}
+                    } catch {
+                        $diagnosticsRetryAfter = [datetime]::UtcNow.AddMinutes(1)
+                        Write-Log 'diagnostics-start-failed; retry in one minute'
+                    }
+                }
                 $snapshot = @(Get-KakaoSnapshot)
                 $signature = Get-KakaoSignature $snapshot
                 $changed = $null -ne $lastSignature -and $signature -cne $lastSignature
+                if ($changed) { Write-Diagnostic $diagnostics 'kakao_process_or_version_changed' @{Processes=$snapshot} }
                 $repair = Test-Path -LiteralPath $script:RequestPath
+                $runningBefore = @(Get-OwnedBlockers)
+                if ($diagnostics -and -not $repair -and -not $changed -and $runningBefore.Count -gt 0 -and [datetime]::UtcNow -ge $retryAfter) {
+                    try { $automaticRepairId = $diagnostics.TryRequestRepair() } catch { Write-Log 'diagnostics-repair-query-failed' }
+                }
                 if ($repair) {
                     Remove-Item -LiteralPath $script:RequestPath -Force
                     $state.RejectedVersion = $null
@@ -221,6 +301,7 @@ function Invoke-Watch([bool]$Once) {
                     $state.LastCheckUtc = $null
                     $state.NextCheckUtc = $null
                     Write-Log 'release-schedule-reset; invalid or future timestamps'
+                    Write-Diagnostic $diagnostics 'release_schedule_reset' @{Reason='invalid_or_future_timestamps'}
                 }
                 if ($repair -or $schedule.Due -or ($changed -and $schedule.ElapsedHours -ge 1)) {
                     $state.LastCheckUtc = [datetime]::UtcNow.ToString('o')
@@ -230,27 +311,41 @@ function Invoke-Watch([bool]$Once) {
                         $lastError = $null
                         $state.NextCheckUtc = [datetime]::UtcNow.AddHours(24).ToString('o')
                         Write-Log 'release-check-completed'
+                        Write-Diagnostic $diagnostics 'release_check_completed' @{BlockerVersion=$(if ($state.Current) {$state.Current.Version} else {$null})}
                     } catch {
                         $lastError = $_.Exception.Message
                         $state.NextCheckUtc = [datetime]::UtcNow.AddMinutes(15).ToString('o')
                         Write-Log ('release-check-failed ' + $lastError)
+                        Write-Diagnostic $diagnostics 'release_check_failed' @{ExceptionType=$_.Exception.GetType().Name}
                     }
                     Write-JsonAtomic $script:StatePath $state
                 }
-                if ($changed -or $repair) {
+                if ($changed -or $repair -or $automaticRepairId) {
                     Stop-OwnedBlockers
                     $lastBlockerPid = $null
-                    $retryAfter = [datetime]::MinValue
-                    $rapidCrashes = 0
-                    Write-Log ('reapply reason=' + $(if ($repair) {'manual-request'} else {'kakao-process-or-version-change'}))
+                    if ($repair -or $changed) {
+                        $retryAfter = [datetime]::MinValue
+                        $rapidCrashes = 0
+                    }
+                    $reason = if ($repair) {'manual-request'} elseif ($automaticRepairId) {'persistent-popup-observed'} else {'kakao-process-or-version-change'}
+                    Write-Log ('reapply reason=' + $reason)
+                    Write-Diagnostic $diagnostics 'blocker_reapply_started' @{Reason=$reason;RequestId=$automaticRepairId}
                 }
-                if (Test-Path -LiteralPath $script:DisablePath) { break }
+                if (Test-Path -LiteralPath $script:DisablePath) {
+                    if ($automaticRepairId) {
+                        Write-Diagnostic $diagnostics 'repair_cancelled' @{RequestId=$automaticRepairId;Reason='protection_paused'}
+                        Complete-DiagnosticRepair $diagnostics $automaticRepairId $false
+                        $automaticRepairId = $null
+                    }
+                    break
+                }
                 $running = @(Get-OwnedBlockers)
                 if ($running.Count -eq 0 -and $null -ne $lastBlockerPid) {
                     if (([datetime]::UtcNow - $lastBlockerStart).TotalSeconds -lt 60) { $rapidCrashes++ }
                     else { $rapidCrashes = 1 }
                     $retryAfter = [datetime]::UtcNow.AddSeconds((Get-CrashDelay $rapidCrashes))
                     Write-Log ('blocker-exited; retry-delay-seconds=' + (Get-CrashDelay $rapidCrashes))
+                    Write-Diagnostic $diagnostics 'blocker_exited' @{RetryDelaySeconds=(Get-CrashDelay $rapidCrashes)}
                     $lastBlockerPid = $null
                     if ($rapidCrashes -ge 3 -and $state.Previous -and (Test-Blocker $state.Previous)) {
                         $state.RejectedVersion = $state.Current.Version
@@ -258,6 +353,7 @@ function Invoke-Watch([bool]$Once) {
                         $state.Previous = $null
                         Write-JsonAtomic $script:StatePath $state
                         Write-Log 'rapid-crashes; rolled-back-to-previous-release'
+                        Write-Diagnostic $diagnostics 'blocker_rolled_back' @{From=$state.RejectedVersion;To=$state.Current.Version;Reason='rapid_crashes'}
                     }
                 }
                 if ($state.Current -and $running.Count -eq 0 -and [datetime]::UtcNow -ge $retryAfter) {
@@ -272,22 +368,44 @@ function Invoke-Watch([bool]$Once) {
                             $state.Previous = $null
                             Write-JsonAtomic $script:StatePath $state
                             Write-Log 'rolled-back-to-previous-release'
+                            Write-Diagnostic $diagnostics 'blocker_rolled_back' @{From=$state.RejectedVersion;To=$state.Current.Version;Reason='startup_failure'}
                         } else { throw }
                     }
                 }
                 $running = @(Get-OwnedBlockers)
+                if ($automaticRepairId -and $diagnostics) {
+                    Complete-DiagnosticRepair $diagnostics $automaticRepairId ($running.Count -gt 0)
+                    $automaticRepairId = $null
+                }
                 if ($running.Count -gt 0 -and $lastBlockerPid -ne $running[0].Id) {
                     $lastBlockerPid = $running[0].Id
                     $lastBlockerStart = $running[0].StartTime.ToUniversalTime()
                 }
                 $lastSignature = $signature
                 $failures = 0
-                $hostsStatus = @(Get-HostsStatus)
-                Write-JsonAtomic $script:StatusPath ([ordered]@{UpdatedUtc=[datetime]::UtcNow.ToString('o');SupervisorPid=$PID;Enabled=$true;BlockerVersion=$(if ($state.Current) {$state.Current.Version} else {$null});BlockerPids=@(Get-OwnedBlockers | ForEach-Object {$_.Id});Kakao=$snapshot;Hosts=$hostsStatus;DnsProtectionComplete=(@($hostsStatus | Where-Object {-not $_.Blocked}).Count -eq 0);LastReleaseCheckUtc=$state.LastCheckUtc;LastError=$lastError})
+                $hostsEvidence = Get-HostsEvidence
+                foreach ($event in @(Get-HostsEvents $lastHostsEvidence $hostsEvidence)) { Write-Diagnostic $diagnostics $event.Event $event.Data }
+                if ($diagnostics) { $lastHostsEvidence = $hostsEvidence }
+                $diagnosticHealth = [pscustomobject]@{running=$false;reason='unavailable'}
+                if ($diagnostics) {
+                    try { $diagnosticHealth = $diagnostics.GetHealthJson() | ConvertFrom-Json } catch { }
+                    if (-not $diagnosticHealth.running) {
+                        $stoppedDiagnostics = $diagnostics; $diagnostics = $null
+                        Stop-Diagnostics $stoppedDiagnostics
+                        $diagnosticsRetryAfter = [datetime]::UtcNow.AddMinutes(1)
+                        Write-Log 'diagnostics-stopped; retry in one minute'
+                    }
+                }
+                Write-JsonAtomic $script:StatusPath ([ordered]@{UpdatedUtc=[datetime]::UtcNow.ToString('o');SupervisorPid=$PID;Enabled=$true;BlockerVersion=$(if ($state.Current) {$state.Current.Version} else {$null});BlockerPids=@(Get-OwnedBlockers | ForEach-Object {$_.Id});Kakao=$snapshot;Hosts=$hostsEvidence.Mappings;DnsProtectionComplete=$hostsEvidence.Complete;Diagnostics=$diagnosticHealth;LastReleaseCheckUtc=$state.LastCheckUtc;LastError=$lastError})
             } catch {
+                if ($automaticRepairId -and $diagnostics) {
+                    Complete-DiagnosticRepair $diagnostics $automaticRepairId $false
+                    $automaticRepairId = $null
+                }
                 $lastError = $_.Exception.Message
                 $failures++
                 Write-Log ('watch-error ' + $lastError)
+                Write-Diagnostic $diagnostics 'supervisor_error' @{ExceptionType=$_.Exception.GetType().Name;RetryDelaySeconds=(Get-CrashDelay $failures)}
                 if (-not $Once) { Start-Sleep -Seconds (Get-CrashDelay $failures) }
             }
             if (-not $Once) { Start-Sleep -Seconds 5 }
@@ -297,10 +415,21 @@ function Invoke-Watch([bool]$Once) {
             Write-JsonAtomic $script:StatusPath ([ordered]@{UpdatedUtc=[datetime]::UtcNow.ToString('o');Enabled=$false;BlockerPids=@()})
             Write-Log 'supervisor-disabled'
         }
-    } finally { if ($locked) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+    } finally {
+        if ($diagnostics) {
+            Write-Diagnostic $diagnostics 'supervisor_stopped' @{Disabled=(Test-Path -LiteralPath $script:DisablePath)}
+            Stop-Diagnostics $diagnostics
+        }
+        try { if ($locked) { $mutex.ReleaseMutex() } } finally { $mutex.Dispose() }
+    }
 }
 if ($Mode -eq 'Library') { return }
 switch ($Mode) {
+    'History' {
+        $historyPath = Join-Path $script:Root 'events.jsonl'
+        if (Test-Path -LiteralPath $historyPath) { Get-Content -LiteralPath $historyPath -Tail 100 -Encoding UTF8 }
+        else { 'No diagnostic events recorded yet.' }
+    }
     'Status' { if (Test-Path -LiteralPath $script:StatusPath) { Get-Content -LiteralPath $script:StatusPath -Raw } else { 'Not started yet.' } }
     'Stop' { [IO.File]::WriteAllText($script:DisablePath, [datetime]::UtcNow.ToString('o')); Start-Sleep -Seconds 6; Stop-OwnedBlockers }
     'Resume' { if (Test-Path -LiteralPath $script:DisablePath) { Remove-Item -LiteralPath $script:DisablePath }; Start-Launcher }
